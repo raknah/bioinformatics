@@ -1,0 +1,13 @@
+[deps]
+BioAlignments = "00701ae9-d1dc-5365-b64a-a3a3ebf5695e"
+BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Clustering = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
+FASTX = "c2308a5c-f048-11e8-3e8a-31650f418d12"
+GenomicFeatures = "899a7d2d-5c61-547b-bef9-6698a8d05446"
+HypothesisTests = "09f84164-cd44-5f33-b23f-e6b0d136a0d5"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+VCFTools = "a620830f-fdd7-5ebc-8d26-3621ab35fbfe"

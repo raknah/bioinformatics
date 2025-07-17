@@ -1,0 +1,35 @@
+# ALLOWED:
+!projects/**/notebooks/
+
+# Ignore raw and intermediate data folders
+genomes/
+variants/
+**/data/
+projects/**/data/**
+
+# Common bioinformatics file types
+*.vcf*
+*.fa
+*.fasta*
+*.bam
+*.fastq*
+*.h5
+*.gz
+*.tbi
+*.csv
+*.tsv
+*.npy
+*.mat
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Git / XML noise
+.gitattributes
+*.xml
+
