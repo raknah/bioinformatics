@@ -1,9 +1,6 @@
 # ALLOW:
 !projects/**/notebooks/
-!figures/
-!figures/*.png
-!figures/*.svg
-!figures/*.pdf
+!projects/**/figures/
 
 # IGNORE:
 
