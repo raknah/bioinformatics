@@ -1,5 +1,16 @@
-# ALLOWED:
+# ALLOW:
 !projects/**/notebooks/
+!figures/
+!figures/*.png
+!figures/*.svg
+!figures/*.pdf
+
+# IGNORE:
+
+# Ignore heavy/scratch/auxiliary plots
+figures/*.tiff
+figures/*.mp4
+figures/*.bak
 
 # Ignore raw and intermediate data folders
 genomes/
