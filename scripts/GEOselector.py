@@ -1,129 +1,140 @@
 #!/usr/bin/env python3
 
-# EXAMPLE USAGE 1
-#
-# python GEOselector.py \
-#   --email fomo@cbigspace.org \
-#   --query '("space radiation" OR "ionizing radiation" OR "Gy") AND "Homo sapiens"[Organism] AND gse[Entry Type]' \
-#   --min-total 6 \
-#   --max-ratio 3.0 \
-#   --control-keywords control sham unexposed \
-#   --treated-keywords irradiated radiation gy cosmic \
-#   --output GSE_shortlist.csv
-
-
-
-#!/usr/bin/env python3
 """
 GEOselector.py
-Shortlist GEO Series (GSE) datasets for human space-radiation transcriptomic analysis,
-using group keyword detection, sample balance, and matrix availability filters.
+Shortlist GEO Series (GSE) datasets for human space-radiation transcriptomic analysis
+by querying Entrez then loading each GSE with GEOparse for reliable sample metadata.
+
+Dependencies:
+    pip install biopython GEOparse pandas tqdm
 """
 
-import argparse
-import time
+import argparse, time
 import pandas as pd
 from Bio import Entrez
+import GEOparse
+from tqdm import tqdm
 
-# ──────── Helper Functions ─────────────────────────────────────────────────────
+def fetch_gse_uids(query: str, retmax: int):
+    handle = Entrez.esearch(db="gds", term=query, retmax=retmax, retmode="xml")
+    rec = Entrez.read(handle); handle.close()
+    return rec["IdList"]
 
-def fetch_gse_ids(query: str, retmax: int) -> list[str]:
-    handle = Entrez.esearch(
-        db="gds",
-        term=query,
-        retmax=retmax,
-        retmode="xml"
-    )
-    result = Entrez.read(handle)
-    handle.close()
-    return result["IdList"]
+def fetch_gse_accession(uid: str) -> str:
+    rec = Entrez.esummary(db="gds", id=uid, retmode="xml")
+    acc = Entrez.read(rec)[0]["Accession"]
+    rec.close()
+    return acc
 
-def fetch_gse_summary(gse_id: str) -> dict:
-    handle = Entrez.esummary(db="gds", id=gse_id, retmode="xml")
-    recs = Entrez.read(handle)
-    handle.close()
-    return recs[0]
-
-# ──────── Main CLI ─────────────────────────────────────────────────────────────
+def classify_samples(gse, ctrl_keys, trt_keys, audit):
+    ctrl = trt = amb = uncls = 0
+    for gsm, sample in gse.gsms.items():
+        desc = " ".join(sample.metadata.get("characteristics_ch1", [])).lower()
+        ic = any(k.lower() in desc for k in ctrl_keys)
+        it = any(k.lower() in desc for k in trt_keys)
+        if ic and not it:
+            ctrl += 1
+        elif it and not ic:
+            trt += 1
+        elif ic and it:
+            amb += 1
+        else:
+            uncls += 1
+        if audit:
+            print(f"  {gsm}: ctrl={ic} trt={it} » {desc[:60]}…")
+    return ctrl, trt, amb, uncls
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Shortlist GEO Series datasets for DE analysis using keyword group detection and balance filters.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+    p = argparse.ArgumentParser()
+    p.add_argument("--email","-e", required=True)
+    p.add_argument("--query",  required=True,
+                   help='Entrez query, e.g. \'("space radiation" OR "ionizing radiation") AND "Homo sapiens"[Organism] AND gse[Entry Type]\'')
+    p.add_argument("--min-total",   type=int,   default=6)
+    p.add_argument("--max-ratio",   type=float, default=3.0)
+    p.add_argument("--retmax",      type=int,   default=2000)
+    p.add_argument("--control-keywords", nargs="+", required=True)
+    p.add_argument("--treated-keywords", nargs="+", required=True)
+    p.add_argument("--verbose",     action="store_true")
+    p.add_argument("--audit",       action="store_true")
+    p.add_argument("--output","-o", default="GSE_shortlist.csv")
+    args = p.parse_args()
 
-    parser.add_argument("--email", "-e", required=True, help="Your email for Entrez API")
-    parser.add_argument("--query", required=True, help="Entrez search query for GSEs")
-    parser.add_argument("--min-total", type=int, default=6, help="Minimum total sample count")
-    parser.add_argument("--max-ratio", type=float, default=3.0, help="Maximum allowed group imbalance (e.g. 3.0 = 3:1)")
-    parser.add_argument("--retmax", type=int, default=2000, help="Maximum number of GSE IDs to retrieve")
-    parser.add_argument("--output", "-o", default="GSE_shortlist.csv", help="Output path for filtered CSV")
-
-    parser.add_argument("--control-keywords", nargs="+", default=["control", "sham"],
-                        help="Terms identifying control group samples")
-    parser.add_argument("--treated-keywords", nargs="+", default=["irradiated", "radiation", "gy"],
-                        help="Terms identifying treated/irradiated samples")
-
-    args = parser.parse_args()
     Entrez.email = args.email
+    print(f"🔍 Searching GEO DataSets: {args.query}")
+    uids = fetch_gse_uids(args.query, args.retmax)
+    print(f"⚡ Retrieved {len(uids)} series\n")
 
-    print(f"🔍 Querying GEO: {args.query}")
-    gse_ids = fetch_gse_ids(args.query, args.retmax)
-    print(f"⚡ Retrieved {len(gse_ids)} GSE IDs")
+    stats = {"passed":0,"missing_group":0,"bad_ratio":0,"too_few":0,"load_fail":0}
+    out = []
 
-    records = []
-
-    for gse in gse_ids:
+    bar = tqdm(uids, desc="🔬 Filtering", unit="UID", dynamic_ncols=True)
+    for uid in bar:
         try:
-            summ = fetch_gse_summary(gse)
-            n_samples = int(summ.get("n_samples", 0))
-            taxon = summ.get("taxon", "")
-            title = summ.get("title", "")
-            summary = summ.get("summary", "")
-            supp = summ.get("supplementaryfiles", "")
+            # fetch accession (e.g. "GSE63952")
+            acc = fetch_gse_accession(uid)
 
-            if taxon != "Homo sapiens":
-                continue
-            if n_samples < args.min_total:
-                continue
+            # load via GEOparse
+            gse = GEOparse.get_GEO(geo=acc, silent=True)
 
-            # Combine text
-            txt = (title + " " + summary).lower()
+            total = len(gse.gsms)
+            if total < args.min_total:
+                stats["too_few"] += 1
+                reason = f"{total} samples"
+                raise StopIteration
 
-            # Group detection
-            n_control = sum(txt.count(word) for word in args.control_keywords)
-            n_treated = sum(txt.count(word) for word in args.treated_keywords)
+            # classify
+            c,t,a,u = classify_samples(gse, args.control_keywords, args.treated_keywords, args.audit)
 
-            if min(n_control, n_treated) == 0:
-                continue
+            if min(c,t) == 0:
+                stats["missing_group"] += 1
+                reason = f"ctrl={c},trt={t}"
+                raise StopIteration
 
-            ratio = max(n_control, n_treated) / min(n_control, n_treated)
+            ratio = max(c,t)/min(c,t)
             if ratio > args.max_ratio:
-                continue
+                stats["bad_ratio"] += 1
+                reason = f"ratio={ratio:.2f}"
+                raise StopIteration
 
-            if not any(ext in supp.lower() for ext in [".csv", ".txt", ".soft.gz"]):
-                continue
-
-            records.append({
-                "GSE_ID": gse,
-                "Samples": n_samples,
-                "Control_Est": n_control,
-                "Treated_Est": n_treated,
-                "Ratio": round(ratio, 2),
-                "Title": title,
-                "Summary": summary,
-                "SuppFiles": supp
+            # passed
+            stats["passed"] += 1
+            reason = "✅ passed"
+            out.append({
+                "GSE":    acc,
+                "UID":    uid,
+                "Samples":total,
+                "Control":c,
+                "Treated":t,
+                "Ratio": round(ratio,2),
+                "Title":  gse.metadata.get("title",[""])[0]
             })
 
-            time.sleep(0.34)  # Stay under NCBI limit
+        except StopIteration:
+            pass
+        except Exception as e:
+            stats["load_fail"] += 1
+            reason = f"ERROR:{e}"
 
-        except Exception as err:
-            print(f"⚠️  Error on {gse}: {err}")
+        bar.set_postfix_str(reason)
+        if args.verbose:
+            passed = stats["passed"]
+            skipped = sum(v for k,v in stats.items() if k!="passed")
+            print(f"📊 passed={passed} skipped={skipped}: {reason} ({acc})")
 
-    df = pd.DataFrame(records)
-    df = df.sort_values("Samples", ascending=False)
-    df.to_csv(args.output, index=False)
-    print(f"\n✔︎ Saved {len(df)} datasets to {args.output}")
+        time.sleep(0.5)
 
-if __name__ == "__main__":
+    bar.close()
+
+    print("\n📊 Final counts:")
+    for k,v in stats.items():
+        print(f"  - {k}: {v}")
+
+    if out:
+        df = pd.DataFrame(out).sort_values("Samples",ascending=False)
+        df.to_csv(args.output,index=False)
+        print(f"\n✔︎ Saved {len(out)} series to {args.output}")
+    else:
+        print("\n❌ No series passed filters.")
+
+if __name__=="__main__":
     main()
