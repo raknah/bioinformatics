@@ -8,7 +8,6 @@
 figures/*.tiff
 figures/*.mp4
 figures/*.bak
-figures/*.png
 
 # Ignore raw and intermediate data folders
 genomes/
