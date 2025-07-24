@@ -88,6 +88,4 @@ function load_GSE(name::String;
     return GSEData(name=name, meta=meta, expression=expr)
 end
 
-
-
 # end # module
